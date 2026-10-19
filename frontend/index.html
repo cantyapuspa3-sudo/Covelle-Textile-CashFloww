@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#d94675">
+  <title>CashFlow | PT Covelle Textile</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=20">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><span class="brand-mark">C</span><span><strong>CashFlow</strong><small>PT Covelle Textile</small></span></div>
+      <button class="sidebar-close" id="sidebarClose" type="button" title="Tutup menu" aria-label="Tutup menu">x</button>
+      <nav class="nav" aria-label="Navigasi utama">
+        <button class="nav-item active" data-view="dashboard"><span class="nav-icon">⌂</span>Dashboard</button>
+        <section class="nav-group is-open">
+          <button class="nav-group-toggle" type="button" aria-expanded="true"><span class="nav-caret">▸</span>DATA INTI</button>
+          <div class="nav-submenu">
+            <button class="nav-item" data-view="cash-accounts">Akun Kas</button>
+            <button class="nav-item" data-view="categories">Kategori</button>
+          </div>
+        </section>
+        <section class="nav-group is-open">
+          <button class="nav-group-toggle" type="button" aria-expanded="true"><span class="nav-caret">▸</span>TRANSAKSI</button>
+          <div class="nav-submenu">
+            <button class="nav-item" data-view="transactions">Semua Transaksi</button>
+            <button class="nav-item" data-view="new-transaction">Buat Transaksi</button>
+          </div>
+        </section>
+        <section class="nav-group is-open">
+          <button class="nav-group-toggle" type="button" aria-expanded="true"><span class="nav-caret">▸</span>APPROVAL</button>
+          <div class="nav-submenu">
+            <button class="nav-item" data-view="approval">Menunggu Persetujuan</button>
+            <button class="nav-item" data-view="approval-history">Riwayat Persetujuan</button>
+          </div>
+        </section>
+        <button class="nav-item" data-view="reports"><span class="nav-icon">▤</span>Laporan Kas</button>
+      </nav>
+      <div class="sidebar-footer"><span class="status-dot" id="supabaseStatusDot"></span><span id="supabaseStatus">Memeriksa koneksi Supabase...</span></div>
+    </aside>
+    <main class="main-content">
+      <header class="topbar">
+        <button class="menu-toggle" id="menuToggle" aria-label="Buka menu">☰</button>
+        <div><span class="eyebrow">CASH MANAGEMENT</span><h1 id="pageTitle">Dashboard</h1></div>
+        <div class="topbar-actions"><div class="user-chip"><span class="avatar" aria-hidden="true">CP</span><span><strong>Cantya Puspa</strong><small>Finance Manager</small></span></div></div>
+      </header>
+      <div id="toast" class="toast" role="status"></div>
+      <div id="appView" class="page-view"></div>
+    </main>
+  </div>
+  <div class="modal-backdrop" id="modalBackdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-header"><h2 id="modalTitle">Tambah Data</h2><button class="modal-close" id="modalClose" type="button" aria-label="Tutup">×</button></div>
+      <form id="masterForm"></form>
+    </section>
+  </div>
+  <script src="app.js?v=28"></script>
+</body>
+</html>
