@@ -3,14 +3,17 @@
 - **Nama:** Cantya Puspa
 - **NIM:** 12030124140273
 - **Kelas:** G
-- 
+
 # Covelle Textile CashFlow
 
 Aplikasi pencatatan kas berbasis frontend statis dengan Supabase sebagai penyimpanan. 
 
-Web Demo Aplikasi: [[Klik di sini untuk membuka Covelle Textile CashFlow](https://cantyapuspa3-sudo.github.io/Covelle-Textile-CashFloww/frontend/index.html)]
+Repository: [cantyapuspa3-sudo/Covelle-Textile-CashFloww](https://github.com/cantyapuspa3-sudo/Covelle-Textile-CashFloww)
 
-Versi ringkas ini menggunakan empat tabel bisnis:
+Web Demo Aplikasi: [Klik di sini untuk membuka Covelle Textile CashFlow](https://cantyapuspa3-sudo.github.io/Covelle-Textile-CashFloww/frontend/index.html)
+
+Versi ringkas ini menggunakan lima tabel bisnis:
+- `branches` — master cabang.
 - `cash_accounts` — akun kas/bank dan saldo awal.
 - `categories` — kategori transaksi.
 - `transactions` — penerimaan, pengeluaran, transfer, dan permintaan kas.
@@ -19,10 +22,13 @@ Versi ringkas ini menggunakan empat tabel bisnis:
 ## Fitur
 
 - Dashboard saldo akun dan transaksi terbaru.
-- Pengelolaan akun kas dan kategori.
-- Pencatatan transaksi kas masuk/keluar, transfer, petty cash, dan permintaan kas.
+- Peringatan saldo minimum per akun kas di dashboard, memakai transaksi Approved/Posted.
+- Pengelolaan cabang, akun kas, dan kategori.
+- Pencatatan transaksi kas masuk/keluar, transfer, petty cash, dan permintaan kas, dengan bukti transaksi opsional PDF/JPG/JPEG/PNG.
 - Approval atau penolakan transaksi serta riwayat keputusan.
-- Ringkasan laporan dari transaksi yang sudah `Approved` atau `Posted`.
+- Bukti transaksi tersimpan di Supabase Storage dan dapat ditinjau approver.
+- Laporan arus kas langsung dengan filter periode, akun kas, dan cabang serta ekspor CSV.
+- Saldo dan laporan hanya memakai transaksi `Approved` atau `Posted`; transfer antar-akun tidak dihitung sebagai penerimaan/pengeluaran perusahaan.
 
 Modul COA, departemen, user/role, jurnal, cash count, approval matrix, dan pengaturan imprest terpisah tidak termasuk dalam aplikasi ringkas ini.
 
@@ -56,7 +62,10 @@ Konfigurasi Supabase frontend berada di `frontend/app.js` melalui `window.CASHFL
 
 ## Supabase
 
-- Jalankan `backend/schema.sql` hanya pada database baru yang belum memiliki tabel target. Untuk database lama, skema ini bukan pengganti proses backfill/cutover.
+- Pada database baru, jalankan `backend/schema.sql`. Skema tersebut menambahkan master `Kantor Pusat` dan `Pabrik`, dan setiap akun kas/transaksi memerlukan cabang.
+- Pada database yang sudah digunakan, backup terlebih dahulu, lalu tinjau kebijakan dan jalankan `backend/migrations/20261025_branches_cashflow.sql`. Migrasi akan mengaitkan akun/transaksi lama ke `Kantor Pusat`; pindahkan akun ke cabang yang benar setelahnya melalui menu Akun Kas. Jangan rerun setup schema sebagai migrasi.
+- Pada database baru maupun lama, jalankan `backend/migrations/20261025_minimum_balance_and_evidence.sql` di SQL Editor Supabase (untuk database lama, setelah migrasi cabang). Migrasi ini menambahkan metadata bukti dan bucket Storage privat `cashflow-evidence` (batas file 10 MB, PDF/JPG/JPEG/PNG). Fitur upload tidak dapat menyimpan bukti sebelum migrasi ini dijalankan. Saldo minimum sudah menjadi kolom akun; isikan nilainya dari menu Akun Kas untuk mengaktifkan peringatan dashboard.
+- Bukti diberi path unik dan kebijakan Storage tidak mengizinkan update/delete objek. Kebijakan anon saat ini mengikuti aplikasi demo tanpa Supabase Auth; siapkan RLS berbasis autentikasi sebelum menyimpan dokumen sensitif atau membuka akses produksi.
 - Untuk database lama, buat dan verifikasi backup terlebih dahulu. Tinjau foreign key, view, trigger, function, policy, dan aplikasi lain yang mungkin bergantung pada tabel legacy sebelum menghapusnya. Jangan gunakan `DROP ... CASCADE` untuk melewati dependency.
 - Perubahan lokal ini tidak menjalankan atau menghapus tabel pada proyek Supabase. `schema.sql` sendiri tidak menghapus tabel legacy dan tidak memindahkan data.
 - Jangan menganggap browser demo identity sebagai login sungguhan. Aplikasi saat ini tidak menyediakan Supabase Auth; identitas pengguna di UI bersifat demo.
