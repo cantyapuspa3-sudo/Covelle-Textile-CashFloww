@@ -5,31 +5,17 @@
   };
   const baseUrl = String(config.url || '').replace(/\/$/, '');
   const anonKey = config.anonKey || '';
-  const evidenceBucket = 'cashflow-evidence';
-  const reimbursementBucket = 'reimbursement-receipts';
-  const maximumEvidenceSize = 10 * 1024 * 1024;
-  const state = { branches: [], cashAccounts: [], transactions: [], approvals: [], reimbursements: [] };
+  const state = { branches: [], cashAccounts: [], transactions: [], approvals: [] };
   const appView = document.querySelector('#appView');
-  const appShell = document.querySelector('#appShell');
-  const authShell = document.querySelector('#authShell');
-  const loginForm = document.querySelector('#loginForm');
-  const authError = document.querySelector('#authError');
   const title = document.querySelector('#pageTitle');
   const statusLabel = document.querySelector('#supabaseStatus');
   const statusDot = document.querySelector('#supabaseStatusDot');
   const modal = document.querySelector('#modalBackdrop');
   const modalForm = document.querySelector('#masterForm');
   const toast = document.querySelector('#toast');
-  let authSession = null;
-  let currentUser = { id: '', name: '', role: '' };
+  const currentUser = { name: 'Pengguna' };
   let activeView = 'dashboard';
   let toastTimer;
-
-  try {
-    authSession = JSON.parse(sessionStorage.getItem('cashflow-auth-session') || 'null');
-  } catch {
-    sessionStorage.removeItem('cashflow-auth-session');
-  }
 
   const viewTitles = {
     dashboard: 'Dashboard',
@@ -37,7 +23,6 @@
     branches: 'Cabang',
     transactions: 'Semua Transaksi',
     'new-transaction': 'Buat Transaksi',
-    reimbursements: 'Reimbursement',
     approval: 'Menunggu Persetujuan',
     'approval-history': 'Riwayat Persetujuan',
     reports: 'Laporan Kas'
@@ -100,99 +85,10 @@
 
   function headers(extra = {}) {
     if (!baseUrl || !anonKey) throw new Error('Konfigurasi Supabase belum lengkap.');
-    return { apikey: anonKey, Authorization: `Bearer ${authSession?.access_token || anonKey}`, ...extra };
-  }
-
-  function storeSession(session) {
-    authSession = session;
-    sessionStorage.setItem('cashflow-auth-session', JSON.stringify(session));
-    const user = session.user || {};
-    const metadata = user.app_metadata || {};
-    if (!user.id || !['employee', 'approver', 'finance_manager'].includes(metadata.role)) {
-      throw new Error('Akun belum dikonfigurasi dengan role Supabase Auth yang valid.');
-    }
-    const name = metadata.full_name || user.user_metadata?.full_name || user.email || 'Pengguna';
-    currentUser = { id: user.id, name, role: metadata.role || '' };
-    document.querySelector('#currentUserName').textContent = name;
-    document.querySelector('#currentUserRole').textContent = ({
-      finance_manager: 'Finance Manager',
-      approver: 'Approver',
-      employee: 'Karyawan'
-    })[currentUser.role] || 'Pengguna';
-    document.querySelector('#userAvatar').textContent = name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
-  }
-
-  function clearSession() {
-    authSession = null;
-    currentUser = { id: '', name: '', role: '' };
-    sessionStorage.removeItem('cashflow-auth-session');
-  }
-
-  async function authFetch(path, options = {}) {
-    if (!baseUrl || !anonKey) throw new Error('Konfigurasi Supabase belum lengkap.');
-    return fetch(`${baseUrl}/auth/v1/${path}`, {
-      ...options,
-      headers: { apikey: anonKey, 'Content-Type': 'application/json', ...options.headers }
-    });
-  }
-
-  async function refreshSessionIfNeeded() {
-    if (!authSession?.access_token) throw new Error('Sesi login tidak ditemukan. Silakan masuk kembali.');
-    const expiration = Number(authSession.expires_at || 0);
-    if (!authSession.refresh_token || (expiration && expiration > Math.floor(Date.now() / 1000) + 60)) return;
-    const response = await authFetch('token?grant_type=refresh_token', {
-      method: 'POST',
-      body: JSON.stringify({ refresh_token: authSession.refresh_token })
-    });
-    if (!response.ok) {
-      const details = await response.text();
-      throw new Error(`Sesi login kedaluwarsa: ${details}`);
-    }
-    const refreshed = await response.json();
-    storeSession({
-      ...refreshed,
-      user: refreshed.user || authSession.user,
-      expires_at: refreshed.expires_at || Math.floor(Date.now() / 1000) + Number(refreshed.expires_in || 3600)
-    });
-  }
-
-  async function submitLogin(event) {
-    event.preventDefault();
-    authError.hidden = true;
-    const submitButton = loginForm.querySelector('button[type="submit"]');
-    submitButton.disabled = true;
-    try {
-      const values = Object.fromEntries(new FormData(loginForm).entries());
-      const response = await authFetch('token?grant_type=password', {
-        method: 'POST',
-        body: JSON.stringify({ email: values.email, password: values.password })
-      });
-      if (!response.ok) {
-        const details = await response.text();
-        throw new Error(`Login gagal (${response.status}): ${details}`);
-      }
-      const session = await response.json();
-      storeSession({
-        ...session,
-        expires_at: session.expires_at || Math.floor(Date.now() / 1000) + Number(session.expires_in || 3600)
-      });
-      authShell.hidden = true;
-      appShell.hidden = false;
-      await loadData();
-      render('dashboard');
-    } catch (error) {
-      authShell.hidden = false;
-      appShell.hidden = true;
-      authError.textContent = error.message;
-      authError.hidden = false;
-      clearSession();
-    } finally {
-      submitButton.disabled = false;
-    }
+    return { apikey: anonKey, Authorization: `Bearer ${anonKey}`, ...extra };
   }
 
   async function request(path, options = {}) {
-    await refreshSessionIfNeeded();
     const response = await fetch(`${baseUrl}/rest/v1/${path}`, {
       ...options,
       headers: headers(options.headers)
@@ -244,12 +140,11 @@
   }
 
   async function loadData() {
-    const [branches, accounts, transactions, approvals, reimbursements] = await Promise.all([
+    const [branches, accounts, transactions, approvals] = await Promise.all([
       loadRows('branches', 'name.asc'),
       loadRows('cash_accounts', 'name.asc'),
       loadRows('transactions', 'transaction_date.desc.nullslast,id.desc'),
-      loadRows('approvals', 'created_at.desc,id.desc'),
-      loadRows('reimbursements', 'created_at.desc,id.desc')
+      loadRows('approvals', 'created_at.desc,id.desc')
     ]);
     state.branches = branches.map(branchFromRow);
     state.cashAccounts = accounts.map(accountFromRow);
@@ -257,7 +152,6 @@
       .filter((row) => Object.hasOwn(transactionTypes, row.type))
       .map(transactionFromRow);
     state.approvals = approvals;
-    state.reimbursements = reimbursements;
     setConnectionStatus(true);
     render(activeView);
   }
@@ -385,20 +279,11 @@
 
   function evidenceAction(transaction) {
     if (!transaction.evidence_path) return '-';
-    return `<div class="evidence-cell"><span>${escapeHtml(transaction.evidence_name || 'Bukti transaksi')}</span><button type="button" class="button-secondary" data-view-evidence data-bucket="${evidenceBucket}" data-path="${escapeHtml(transaction.evidence_path)}" data-name="${escapeHtml(transaction.evidence_name || 'Bukti transaksi')}" data-mime="${escapeHtml(transaction.evidence_mime_type || '')}">Lihat / Unduh</button></div>`;
-  }
-
-  function reimbursementEvidenceAction(reimbursement) {
-    return `<div class="evidence-cell"><span>${escapeHtml(reimbursement.receipt_original_name || 'Bukti reimbursement')}</span><button type="button" class="button-secondary" data-view-evidence data-bucket="${reimbursementBucket}" data-path="${escapeHtml(reimbursement.receipt_storage_path)}" data-name="${escapeHtml(reimbursement.receipt_original_name || 'Bukti reimbursement')}" data-mime="${escapeHtml(reimbursement.receipt_mime_type || '')}">Lihat / Unduh</button></div>`;
-  }
-
-  function canApprove() {
-    return ['approver', 'finance_manager'].includes(currentUser.role);
+    return `${escapeHtml(transaction.evidence_name || 'Bukti transaksi')} (tersimpan privat; login dinonaktifkan)`;
   }
 
   function renderDashboard() {
     const pending = state.transactions.filter((row) => row.status === 'Pending').length;
-    const pendingReimbursements = state.reimbursements.filter((row) => ['Submitted', 'Under Review'].includes(row.status)).length;
     const currentBalance = state.cashAccounts.reduce((total, account) => total + balance(account), 0);
     const recent = state.transactions.slice(0, 8);
     const branchBalances = state.branches.filter((branch) => branch.is_active).map((branch) => {
@@ -410,7 +295,6 @@
       <div class="metrics">
         <article class="metric-card"><span class="label">Saldo Seluruh Akun</span><div class="value">${formatMoney(currentBalance)}</div></article>
         <article class="metric-card"><span class="label">Akun Kas Aktif</span><div class="value">${state.cashAccounts.filter((account) => account.is_active).length}</div></article>
-        <article class="metric-card"><span class="label">Reimbursement Menunggu</span><div class="value">${pendingReimbursements}</div></article>
         <article class="metric-card"><span class="label">Menunggu Approval</span><div class="value">${pending}</div></article>
       </div>
       <section class="branch-balances-section"><div class="panel-header"><div><h3>Saldo per Cabang</h3><p>Saldo awal ditambah transaksi Approved/Posted, termasuk transfer antar-akun.</p></div></div><div class="branch-balances">${branchBalances || '<div class="empty-state">Belum ada cabang aktif.</div>'}</div></section>
@@ -440,7 +324,7 @@
     const columns = isAccounts
       ? [['code', 'Kode'], ['name', 'Nama'], ['branch_id', 'Cabang'], ['account_type', 'Jenis'], ['opening_balance', 'Saldo Awal'], ['minimum_balance', 'Saldo Minimum'], ['status', 'Status']]
       : [['code', 'Kode'], ['name', 'Nama'], ['location', 'Lokasi'], ['status', 'Status']];
-    const canManage = currentUser.role === 'finance_manager';
+    const canManage = true;
     const displayValue = (row, key) => key === 'status' ? statusBadge(row.status)
       : key === 'branch_id' ? escapeHtml(branchName(row.branch_id))
         : key.endsWith('balance') ? formatMoney(row[key]) : escapeHtml(row[key] || '-');
@@ -466,10 +350,10 @@
         <div class="field"><label for="source_cash_account_id">Akun sumber (transfer/top-up)</label><select id="source_cash_account_id" name="source_cash_account_id"><option value="">Pilih akun sumber</option>${accountOptions}</select></div>
         <div class="field"><label for="category">Kategori</label><input id="category" name="category" type="text" maxlength="120"></div>
         <div class="field"><label for="amount">Nominal (Rp)</label><input id="amount" name="amount" type="number" min="1" step="0.01" required></div>
-        <div class="field"><label for="requester">Pemohon</label><input id="requester" name="requester" type="text" value="${escapeHtml(currentUser.name)}"></div>
+        <div class="field"><label for="requester">Pemohon</label><input id="requester" name="requester" type="text" required maxlength="150"></div>
         <div class="field"><label for="vendor">Vendor</label><input id="vendor" name="vendor" type="text"></div>
         <div class="field full"><label for="description">Keterangan</label><input id="description" name="description" type="text"></div>
-        <div class="field full"><label for="evidence">Bukti transaksi (opsional)</label><input id="evidence" name="evidence" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"><small class="field-help">PDF, JPG, JPEG, atau PNG · Maksimal 10 MB</small></div>
+        <p class="report-note full">Upload dan pratinjau bukti dinonaktifkan karena penyimpanan bukti tetap privat.</p>
         <div class="form-actions"><button class="button-primary">Simpan Transaksi</button></div>
       </div></form>`;
   }
@@ -480,42 +364,14 @@
 
   function renderApprovals(history = false) {
     if (history) {
-      const approvalsTable = state.approvals.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Transaksi</th><th>Penyetuju</th><th>Keputusan</th><th>Catatan</th><th>Waktu</th></tr></thead><tbody>${state.approvals.map((row) => `<tr><td>${escapeHtml(row.transaction_id || row.reimbursement_id || '-')}</td><td>${escapeHtml(row.approver_name_snapshot || row.approver_id || '-')}</td><td>${statusBadge(row.action)}</td><td>${escapeHtml(row.notes || '-')}</td><td>${escapeHtml(row.created_at ? new Date(row.created_at).toLocaleString('id-ID') : '-')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-state">Belum ada riwayat persetujuan.</div>';
+      const transactionApprovals = state.approvals.filter((row) => row.transaction_id);
+      const approvalsTable = transactionApprovals.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Transaksi</th><th>Penyetuju</th><th>Keputusan</th><th>Catatan</th><th>Waktu</th></tr></thead><tbody>${transactionApprovals.map((row) => `<tr><td>${escapeHtml(row.transaction_id)}</td><td>${escapeHtml(row.approver_name_snapshot || row.approver_id || '-')}</td><td>${statusBadge(row.action)}</td><td>${escapeHtml(row.notes || '-')}</td><td>${escapeHtml(row.created_at ? new Date(row.created_at).toLocaleString('id-ID') : '-')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-state">Belum ada riwayat persetujuan transaksi.</div>';
       return `<div class="section-head"><div><span class="eyebrow">APPROVAL</span><h2>Riwayat Persetujuan</h2></div></div><div class="panel">${approvalsTable}</div>`;
     }
-    if (!canApprove()) return '<div class="section-head"><div><span class="eyebrow">APPROVAL</span><h2>Menunggu Persetujuan</h2></div></div><div class="panel"><div class="empty-state">Akses approval hanya tersedia untuk Approver dan Finance Manager.</div></div>';
     const transactions = state.transactions.filter((row) => row.status === 'Pending');
-    const reimbursements = state.reimbursements.filter((row) => ['Submitted', 'Under Review'].includes(row.status));
     const transactionRowsMarkup = transactions.map((row) => `<tr><td>${escapeHtml(row.id)}</td><td>${escapeHtml(transactionTypes[row.type] || row.type)}</td><td>${escapeHtml(row.requester || row.created_by || '-')}</td><td>${formatMoney(row.amount)}</td><td>${escapeHtml(row.description || '-')}</td><td>${evidenceAction(row)}</td><td><button class="button-primary" data-decision="Approved" data-kind="transaction" data-id="${escapeHtml(row.id)}">Setujui</button> <button class="button-secondary" data-decision="Rejected" data-kind="transaction" data-id="${escapeHtml(row.id)}">Tolak</button> <button class="button-secondary" data-decision="Revision Requested" data-kind="transaction" data-id="${escapeHtml(row.id)}">Minta revisi</button></td></tr>`).join('');
-    const reimbursementRowsMarkup = reimbursements.map((row) => `<tr><td>${escapeHtml(row.id)}</td><td>${escapeHtml(row.employee_name)}</td><td>${escapeHtml(row.department)}</td><td>${formatDate(row.expense_date)}</td><td>${formatMoney(row.amount)}</td><td>${escapeHtml(row.description)}</td><td>${reimbursementEvidenceAction(row)}</td><td><button class="button-primary" data-decision="Approved" data-kind="reimbursement" data-id="${escapeHtml(row.id)}">Setujui</button> <button class="button-secondary" data-decision="Rejected" data-kind="reimbursement" data-id="${escapeHtml(row.id)}">Tolak</button> <button class="button-secondary" data-decision="Revision Requested" data-kind="reimbursement" data-id="${escapeHtml(row.id)}">Minta revisi</button></td></tr>`).join('');
     return `<div class="section-head"><div><span class="eyebrow">APPROVAL</span><h2>Menunggu Persetujuan</h2></div></div>
-      <div class="panel"><div class="panel-header"><h3>Transaksi kas</h3></div>${transactions.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Transaksi</th><th>Jenis</th><th>Pemohon</th><th>Nominal</th><th>Keterangan</th><th>Bukti</th><th>Aksi</th></tr></thead><tbody>${transactionRowsMarkup}</tbody></table></div>` : '<div class="empty-state">Tidak ada transaksi kas yang menunggu approval.</div>'}</div>
-      <div class="panel"><div class="panel-header"><h3>Reimbursement</h3></div>${reimbursements.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Pengajuan</th><th>Pemohon</th><th>Departemen</th><th>Tanggal</th><th>Nominal</th><th>Keterangan</th><th>Bukti</th><th>Aksi</th></tr></thead><tbody>${reimbursementRowsMarkup}</tbody></table></div>` : '<div class="empty-state">Tidak ada reimbursement yang menunggu review.</div>'}</div>`;
-  }
-
-  function renderReimbursements() {
-    const canPay = currentUser.role === 'finance_manager';
-    const accounts = state.cashAccounts.filter((account) => account.is_active);
-    const rows = state.reimbursements.map((row) => {
-      const canSubmit = row.owner_id === currentUser.id && row.status === 'Draft';
-      const paymentOptions = accounts.map((account) => `<option value="${escapeHtml(account.id)}">${escapeHtml(account.name)}</option>`).join('');
-      const payment = canPay && row.status === 'Approved'
-        ? `<select id="paymentAccount-${escapeHtml(row.id)}" aria-label="Akun pembayaran">${paymentOptions}</select> <button class="button-primary" data-pay-reimbursement="${escapeHtml(row.id)}">Bayar</button>`
-        : '';
-      const retryUpload = canSubmit ? `<input type="file" data-retry-receipt accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" aria-label="Pilih bukti reimbursement"><button class="button-primary" data-retry-receipt="${escapeHtml(row.id)}">Unggah & Ajukan</button>` : '';
-      return `<tr><td>${escapeHtml(row.id)}</td><td>${escapeHtml(row.employee_name)}</td><td>${escapeHtml(row.department)}</td><td>${formatDate(row.expense_date)}</td><td>${escapeHtml(row.expense_category)}</td><td>${formatMoney(row.amount)}</td><td>${statusBadge(row.status)}</td><td>${escapeHtml(row.description)}</td><td>${reimbursementEvidenceAction(row)}</td><td>${retryUpload}${payment}</td></tr>`;
-    }).join('');
-    return `<div class="section-head"><div><span class="eyebrow">REIMBURSEMENT</span><h2>Pengajuan Reimbursement</h2></div></div>
-      <form class="panel transaction-form" id="reimbursementForm"><div class="panel-header"><div><h3>Pengajuan baru</h3><p>Bukti wajib diunggah sebelum pengajuan dikirim.</p></div></div><div class="form-grid">
-      <div class="field"><label for="reimbursementEmployee">Nama karyawan</label><input id="reimbursementEmployee" name="employee_name" value="${escapeHtml(currentUser.name)}" required maxlength="150"></div>
-      <div class="field"><label for="reimbursementDepartment">Departemen</label><input id="reimbursementDepartment" name="department" required maxlength="150"></div>
-      <div class="field"><label for="reimbursementDate">Tanggal pengeluaran</label><input id="reimbursementDate" name="expense_date" type="date" value="${localDate()}" required></div>
-      <div class="field"><label for="reimbursementCategory">Kategori</label><input id="reimbursementCategory" name="expense_category" required maxlength="120"></div>
-      <div class="field"><label for="reimbursementAmount">Nominal (Rp)</label><input id="reimbursementAmount" name="amount" type="number" min="1" step="0.01" required></div>
-      <div class="field full"><label for="reimbursementDescription">Keterangan</label><textarea id="reimbursementDescription" name="description" required maxlength="2000"></textarea></div>
-      <div class="field full"><label for="reimbursementReceipt">Bukti (PDF, JPG, PNG, atau WebP; maks. 10 MB)</label><input id="reimbursementReceipt" name="receipt" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" required></div>
-      <div class="form-actions"><button class="button-primary">Simpan dan Ajukan</button></div></div></form>
-      <div class="panel"><div class="panel-header"><h3>Daftar pengajuan</h3></div>${rows.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Pemohon</th><th>Departemen</th><th>Tanggal</th><th>Kategori</th><th>Nominal</th><th>Status</th><th>Keterangan</th><th>Bukti</th><th>Aksi</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty-state">Belum ada reimbursement.</div>'}</div>`;
+      <div class="panel"><div class="panel-header"><h3>Transaksi kas</h3></div>${transactions.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Transaksi</th><th>Jenis</th><th>Pemohon</th><th>Nominal</th><th>Keterangan</th><th>Bukti</th><th>Aksi</th></tr></thead><tbody>${transactionRowsMarkup}</tbody></table></div>` : '<div class="empty-state">Tidak ada transaksi kas yang menunggu approval.</div>'}</div>`;
   }
 
   function renderReports() {
@@ -644,7 +500,6 @@
       : ['cash-accounts', 'branches'].includes(view) ? renderMaster(view)
       : view === 'new-transaction' ? renderTransactionForm()
       : view === 'transactions' ? renderTransactions()
-      : view === 'reimbursements' ? renderReimbursements()
       : view === 'approval' ? renderApprovals()
       : view === 'approval-history' ? renderApprovals(true)
       : renderReports();
@@ -664,7 +519,6 @@
   }
 
   function openMasterModal(view, id = '') {
-    if (currentUser.role !== 'finance_manager') return showToast('Hanya Finance Manager yang dapat mengelola data inti.');
     const accountMode = view === 'cash-accounts';
     const branchMode = view === 'branches';
     const records = accountMode ? state.cashAccounts : state.branches;
@@ -722,7 +576,6 @@
   }
 
   async function deleteMaster(view, id) {
-    if (currentUser.role !== 'finance_manager') return showToast('Hanya Finance Manager yang dapat mengelola data inti.');
     const tableName = view === 'cash-accounts' ? 'cash_accounts' : 'branches';
     if (!window.confirm('Hapus data ini? Akun/kategori yang dipakai transaksi tidak dapat dihapus.')) return;
     try {
@@ -735,70 +588,6 @@
       showToast('Data berhasil dihapus.');
     } catch (error) {
       showToast(`Gagal menghapus data: ${error.message}`);
-    }
-  }
-
-  function validateEvidence(file) {
-    if (!file) return '';
-    const extension = file.name.split('.').pop()?.toLowerCase() || '';
-    const expectedMimeTypes = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png' };
-    if (!expectedMimeTypes[extension] || expectedMimeTypes[extension] !== file.type.toLowerCase()) {
-      return 'Bukti transaksi harus berupa file PDF, JPG, JPEG, atau PNG yang valid.';
-    }
-    if (!file.size || file.size > maximumEvidenceSize) {
-      return 'Ukuran bukti transaksi harus lebih dari 0 byte dan tidak boleh melebihi 10 MB.';
-    }
-    return '';
-  }
-
-  async function uploadEvidence(file, transactionId) {
-    const extension = file.name.split('.').pop().toLowerCase();
-    const uniqueId = window.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    const path = `${currentUser.id}/${transactionId}/${uniqueId}.${extension}`;
-    const encodedPath = path.split('/').map(encodeURIComponent).join('/');
-    const response = await fetch(`${baseUrl}/storage/v1/object/${evidenceBucket}/${encodedPath}`, {
-      method: 'POST',
-      headers: { ...headers(), 'Content-Type': file.type, 'x-upsert': 'false' },
-      body: file
-    });
-    if (!response.ok) {
-      const details = await response.text();
-      throw new Error(`Supabase Storage ${response.status}: ${details}`);
-    }
-    return path;
-  }
-
-  async function viewEvidence(path, name, mimeType, bucket = evidenceBucket) {
-    try {
-      const encodedPath = path.split('/').map(encodeURIComponent).join('/');
-      const response = await fetch(`${baseUrl}/storage/v1/object/sign/${bucket}/${encodedPath}`, {
-        method: 'POST',
-        headers: { ...headers(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expiresIn: 300 })
-      });
-      if (!response.ok) {
-        const details = await response.text();
-        throw new Error(`Supabase Storage ${response.status}: ${details}`);
-      }
-      const result = await response.json();
-      if (!result.signedURL) throw new Error('Supabase Storage tidak mengembalikan tautan bukti.');
-      const signedUrl = /^https?:\/\//i.test(result.signedURL)
-        ? result.signedURL
-        : result.signedURL.startsWith('/storage/v1/')
-          ? `${baseUrl}${result.signedURL}`
-          : `${baseUrl}/storage/v1/${result.signedURL.replace(/^\/+/, '')}`;
-      const downloadUrl = new URL(signedUrl);
-      downloadUrl.searchParams.set('download', name);
-      const preview = mimeType === 'application/pdf'
-        ? `<iframe class="evidence-pdf" src="${escapeHtml(signedUrl)}" title="Pratinjau ${escapeHtml(name)}"></iframe>`
-        : mimeType.startsWith('image/')
-          ? `<img class="evidence-image" src="${escapeHtml(signedUrl)}" alt="Pratinjau ${escapeHtml(name)}">`
-          : '<p class="report-note">Pratinjau tidak tersedia untuk tipe file ini.</p>';
-      document.querySelector('#modalTitle').textContent = 'Bukti Transaksi';
-      modalForm.innerHTML = `<div class="evidence-preview"><p><strong>${escapeHtml(name)}</strong></p>${preview}<div class="evidence-actions"><a class="button-primary" href="${escapeHtml(signedUrl)}" target="_blank" rel="noopener">Buka</a><a class="button-secondary" href="${escapeHtml(downloadUrl.href)}" target="_blank" rel="noopener">Unduh</a><button type="button" class="button-secondary" data-close-modal>Tutup</button></div></div>`;
-      modal.hidden = false;
-    } catch (error) {
-      showToast(`Gagal membuka bukti transaksi: ${error.message}`);
     }
   }
 
@@ -825,9 +614,6 @@
       return showToast('Pilih akun sumber untuk transaksi ini.');
     }
     if (values.source_cash_account_id && !sourceAccount) return showToast('Akun sumber harus aktif dan berasal dari cabang yang dipilih.');
-    const evidenceFile = form.querySelector('#evidence')?.files?.[0];
-    const evidenceError = validateEvidence(evidenceFile);
-    if (evidenceError) return showToast(evidenceError);
     const row = {
       id: makeId(({ 'cash-in': 'CIN', 'cash-out': 'COUT', 'cash-transfer': 'TRF', 'petty-topup': 'PCT', 'petty-expense': 'PCV', 'petty-replenishment': 'PCR', 'cash-request': 'REQ' })[type]),
       type,
@@ -840,25 +626,11 @@
       requester: values.requester || null,
       amount: Number(values.amount),
       description: values.description || null,
-      status: requiresApproval || currentUser.role !== 'finance_manager' ? 'Pending' : 'Posted',
-      created_by: currentUser.name,
-      created_by_user_id: currentUser.id
+      status: requiresApproval ? 'Pending' : 'Posted',
+      created_by: values.requester.trim()
     };
     const submitButton = form.querySelector('button[type="submit"], .form-actions button');
     if (submitButton) submitButton.disabled = true;
-    let evidencePath = '';
-    if (evidenceFile) {
-      try {
-        evidencePath = await uploadEvidence(evidenceFile, row.id);
-        row.evidence_path = evidencePath;
-        row.evidence_name = evidenceFile.name;
-        row.evidence_mime_type = evidenceFile.type;
-      } catch (error) {
-        if (submitButton) submitButton.disabled = false;
-        showToast(`Gagal mengunggah bukti transaksi. Transaksi belum disimpan: ${error.message}`);
-        return;
-      }
-    }
     let savedTransaction;
     try {
       const insertedRows = await request('transactions', {
@@ -872,8 +644,7 @@
       }
     } catch (error) {
       if (submitButton) submitButton.disabled = false;
-      const evidenceNotice = evidencePath ? ` Bukti sudah tersimpan di Storage pada ${evidencePath} dan tidak dihapus otomatis.` : '';
-      showToast(`Gagal menyimpan transaksi: ${error.message}.${evidenceNotice}`);
+      showToast(`Gagal menyimpan transaksi: ${error.message}`);
       return;
     }
 
@@ -888,210 +659,36 @@
   }
 
   async function decide(targetKind, targetId, action) {
-    if (!canApprove()) return showToast('Akses approval hanya tersedia untuk Approver dan Finance Manager.');
-    const target = targetKind === 'transaction'
-      ? state.transactions.find((row) => row.id === targetId)
-      : state.reimbursements.find((row) => row.id === targetId);
+    if (targetKind !== 'transaction') return showToast('Jenis approval tidak didukung.');
+    const target = state.transactions.find((row) => row.id === targetId);
     if (!target) return showToast('Data yang akan diputuskan tidak ditemukan.');
+    const approverName = window.prompt('Nama penyetuju:');
+    if (approverName === null) return;
+    if (!approverName.trim() || approverName.trim().length > 150) return showToast('Nama penyetuju wajib diisi (maksimal 150 karakter).');
     const notes = window.prompt('Masukkan catatan keputusan (wajib):');
     if (notes === null) return;
     if (!notes.trim() || notes.length > 2000) return showToast('Catatan wajib diisi dan maksimal 2.000 karakter.');
-    let decisionSaved = false;
     try {
-      await request('rpc/cashflow_record_approval', {
+      await request('rpc/cashflow_record_public_transaction_approval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          p_target_kind: targetKind,
           p_target_id: targetId,
           p_action: action,
+          p_approver_name: approverName.trim(),
           p_notes: notes.trim()
         })
       });
-      decisionSaved = true;
-      try {
-        await loadData();
-        render('approval');
-      } catch (error) {
-        showToast(`Keputusan untuk ${targetId} tersimpan, tetapi daftar gagal dimuat ulang: ${error.message}`);
-        return;
-      }
-      showToast(`${targetKind === 'transaction' ? 'Transaksi' : 'Reimbursement'} ${targetId} berhasil diperbarui.`);
+      await loadData();
+      render('approval');
+      showToast(`Keputusan transaksi ${targetId} berhasil disimpan.`);
     } catch (error) {
-      showToast(decisionSaved
-        ? `Keputusan tersimpan, tetapi terjadi kesalahan setelahnya: ${error.message}`
-        : `Gagal menyimpan keputusan: ${error.message}`);
-    }
-  }
-
-  function validateReceipt(file) {
-    const extension = file?.name.split('.').pop()?.toLowerCase() || '';
-    const allowed = {
-      pdf: ['application/pdf'],
-      jpg: ['image/jpeg'],
-      jpeg: ['image/jpeg'],
-      png: ['image/png'],
-      webp: ['image/webp']
-    };
-    if (!file || !allowed[extension]?.includes(file.type.toLowerCase())) {
-      return 'Bukti reimbursement harus berupa PDF, JPG, JPEG, PNG, atau WebP yang valid.';
-    }
-    if (!file.size || file.size > maximumEvidenceSize) {
-      return 'Ukuran bukti reimbursement harus lebih dari 0 byte dan tidak boleh melebihi 10 MB.';
-    }
-    return '';
-  }
-
-  async function uploadReceipt(file, path) {
-    const encodedPath = path.split('/').map(encodeURIComponent).join('/');
-    const response = await fetch(`${baseUrl}/storage/v1/object/${reimbursementBucket}/${encodedPath}`, {
-      method: 'POST',
-      headers: { ...headers(), 'Content-Type': file.type, 'x-upsert': 'false' },
-      body: file
-    });
-    if (!response.ok) {
-      const details = await response.text();
-      throw new Error(`Supabase Storage ${response.status}: ${details}`);
-    }
-  }
-
-  async function createReimbursement(event) {
-    event.preventDefault();
-    const form = event.target;
-    const values = Object.fromEntries(new FormData(form).entries());
-    const file = form.querySelector('#reimbursementReceipt')?.files?.[0];
-    const validationError = validateReceipt(file);
-    if (validationError) return showToast(validationError);
-    const extension = file.name.split('.').pop().toLowerCase();
-    const id = makeId('RBP');
-    const path = `${currentUser.id}/${id}.${extension}`;
-    const draft = {
-      id,
-      owner_id: currentUser.id,
-      employee_name: values.employee_name.trim(),
-      department: values.department.trim(),
-      expense_date: values.expense_date,
-      expense_category: values.expense_category.trim(),
-      amount: Number(values.amount),
-      description: values.description.trim(),
-      receipt_storage_path: path,
-      receipt_original_name: file.name,
-      receipt_mime_type: file.type,
-      receipt_size_bytes: file.size,
-      status: 'Draft'
-    };
-    const submitButton = form.querySelector('button[type="submit"], .form-actions button');
-    if (submitButton) submitButton.disabled = true;
-    let draftSaved = false;
-    try {
-      const created = await request('reimbursements', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
-        body: JSON.stringify(draft)
-      });
-      if (!created?.some((row) => row.id === id)) throw new Error('Draft reimbursement tidak tersimpan di Supabase.');
-      draftSaved = true;
-      try {
-        await uploadReceipt(file, path);
-      } catch (error) {
-        try {
-          await loadData();
-          render('reimbursements');
-        } catch (reloadError) {
-          showToast(`Draft ${id} tersimpan, tetapi bukti gagal diunggah dan belum diajukan: ${error.message}. Daftar gagal dimuat ulang: ${reloadError.message}`);
-          return;
-        }
-        showToast(`Draft ${id} tersimpan, tetapi bukti gagal diunggah dan belum diajukan: ${error.message}`);
-        return;
-      }
-      try {
-        await request('rpc/cashflow_submit_reimbursement', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ p_reimbursement_id: id })
-        });
-      } catch (error) {
-        showToast(`Bukti tersimpan, tetapi reimbursement ${id} belum diajukan: ${error.message}`);
-        return;
-      }
-      try {
-        await loadData();
-        render('reimbursements');
-      } catch (error) {
-        showToast(`Reimbursement ${id} sudah diajukan, tetapi daftar gagal dimuat ulang: ${error.message}`);
-        return;
-      }
-      showToast(`Reimbursement ${id} berhasil diajukan.`);
-    } catch (error) {
-      showToast(draftSaved
-        ? `Draft reimbursement ${id} tersimpan, tetapi proses pengajuan gagal: ${error.message}`
-        : `Gagal menyimpan draft reimbursement ${id}: ${error.message}`);
-    } finally {
-      if (submitButton) submitButton.disabled = false;
-    }
-  }
-
-  async function retryReimbursementReceipt(id, button) {
-    const file = button.closest('td')?.querySelector('input[type="file"]')?.files?.[0];
-    const validationError = validateReceipt(file);
-    if (validationError) return showToast(validationError);
-    const extension = file.name.split('.').pop().toLowerCase();
-    const path = `${currentUser.id}/${id}-${makeId('RECEIPT')}.${extension}`;
-    try {
-      await request(`reimbursements?id=eq.${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          receipt_storage_path: path,
-          receipt_original_name: file.name,
-          receipt_mime_type: file.type,
-          receipt_size_bytes: file.size
-        })
-      });
-      await uploadReceipt(file, path);
-      await request('rpc/cashflow_submit_reimbursement', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_reimbursement_id: id })
-      });
-      try {
-        await loadData();
-        render('reimbursements');
-      } catch (error) {
-        showToast(`Reimbursement ${id} sudah diajukan, tetapi daftar gagal dimuat ulang: ${error.message}`);
-        return;
-      }
-      showToast(`Reimbursement ${id} berhasil diajukan.`);
-    } catch (error) {
-      showToast(`Bukti reimbursement ${id} belum berhasil diajukan: ${error.message}`);
-    }
-  }
-
-  async function payReimbursement(id, button) {
-    const accountId = button.closest('td')?.querySelector('select')?.value;
-    if (!accountId) return showToast('Pilih akun kas untuk pembayaran reimbursement.');
-    try {
-      const transactionId = await request('rpc/cashflow_pay_reimbursement', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_reimbursement_id: id, p_cash_account_id: accountId })
-      });
-      try {
-        await loadData();
-        render('reimbursements');
-      } catch (error) {
-        showToast(`Pembayaran tersimpan sebagai transaksi ${transactionId}, tetapi daftar gagal dimuat ulang: ${error.message}`);
-        return;
-      }
-      showToast(`Reimbursement ${id} dibayar melalui transaksi ${transactionId}.`);
-    } catch (error) {
-      showToast(`Gagal membayar reimbursement ${id}: ${error.message}`);
+      showToast(`Gagal menyimpan keputusan untuk ${targetId}: ${error.message}`);
     }
   }
 
   appView.addEventListener('submit', (event) => {
     if (event.target.id === 'transactionForm') createTransaction(event);
-    if (event.target.id === 'reimbursementForm') createReimbursement(event);
     if (event.target.id === 'reportFilters') {
       event.preventDefault();
       const values = Object.fromEntries(new FormData(event.target).entries());
@@ -1131,11 +728,6 @@
     if (button.dataset.editMaster) openMasterModal(button.dataset.editMaster, button.dataset.id);
     if (button.dataset.deleteMaster) deleteMaster(button.dataset.deleteMaster, button.dataset.id);
     if (button.dataset.decision) decide(button.dataset.kind, button.dataset.id, button.dataset.decision);
-    if (button.dataset.retryReceipt) retryReimbursementReceipt(button.dataset.retryReceipt, button);
-    if (button.dataset.payReimbursement) payReimbursement(button.dataset.payReimbursement, button);
-    if (button.hasAttribute('data-view-evidence')) {
-      viewEvidence(button.dataset.path, button.dataset.name, button.dataset.mime || '', button.dataset.bucket || evidenceBucket);
-    }
     if (button.hasAttribute('data-export-csv')) exportReportCsv();
   });
   modal.addEventListener('click', (event) => {
@@ -1151,53 +743,11 @@
   document.querySelector('#menuToggle').addEventListener('click', () => document.querySelector('#sidebar').classList.toggle('open'));
   document.querySelector('#sidebarClose').addEventListener('click', () => document.querySelector('#sidebar').classList.remove('open'));
 
-  loginForm.addEventListener('submit', submitLogin);
-  document.querySelector('#logoutButton').addEventListener('click', async () => {
-    try {
-      await refreshSessionIfNeeded();
-      const response = await authFetch('logout', { method: 'POST', headers: { Authorization: `Bearer ${authSession.access_token}` } });
-      if (!response.ok) {
-        const details = await response.text();
-        throw new Error(`Supabase ${response.status}: ${details}`);
-      }
-    } catch (error) {
-      showToast(`Sesi lokal ditutup, tetapi logout Supabase gagal: ${error.message}`);
-    }
-    clearSession();
-    appShell.hidden = true;
-    authShell.hidden = false;
-    loginForm.reset();
-    authError.hidden = true;
-    state.branches = [];
-    state.cashAccounts = [];
-    state.transactions = [];
-    state.approvals = [];
-    state.reimbursements = [];
-  });
   setInterval(() => {
     const dateLabel = document.querySelector('#dashboardDate');
     if (dateLabel) dateLabel.textContent = formatCurrentDate();
   }, 60_000);
-  (async function bootstrapAuth() {
-    if (!authSession?.access_token) {
-      authShell.hidden = false;
-      return;
-    }
-    try {
-      await refreshSessionIfNeeded();
-      const response = await authFetch('user', { headers: { Authorization: `Bearer ${authSession.access_token}` } });
-      if (!response.ok) throw new Error('Sesi tidak valid atau sudah kedaluwarsa.');
-      const user = await response.json();
-      storeSession({ ...authSession, user });
-      authShell.hidden = true;
-      appShell.hidden = false;
-    } catch (error) {
-      clearSession();
-      authShell.hidden = false;
-      authError.textContent = error.message;
-      authError.hidden = false;
-      return;
-    }
+  (async function bootstrap() {
     try {
       await loadData();
       render('dashboard');

@@ -2,8 +2,8 @@
 -- For an existing installation, run migrations/20261025_branches_cashflow.sql
 -- instead of rerunning this setup.
 -- This schema contains the five business tables used by the simplified app.
--- The development policies preserve the project's existing public anon access;
--- configure Supabase Auth and production RLS policies before using real data.
+-- This no-login setup exposes cash data through the public anon role. Do not
+-- use it for confidential or production data without adding authenticated RLS.
 
 CREATE TABLE IF NOT EXISTS public.branches (
     id varchar(50) PRIMARY KEY,

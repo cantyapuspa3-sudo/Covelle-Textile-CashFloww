@@ -16,20 +16,19 @@ Versi ini menggunakan tabel bisnis berikut:
 - `branches` — master cabang.
 - `cash_accounts` — akun kas/bank dan saldo awal.
 - `transactions` — penerimaan, pengeluaran, transfer, dan permintaan kas.
-- `approvals` — riwayat keputusan transaksi dan reimbursement.
-- `reimbursements` — pengajuan reimbursement beserta bukti.
+- `approvals` — riwayat keputusan transaksi.
 
 ## Fitur
 
 - Dashboard saldo akun dan transaksi terbaru.
 - Peringatan saldo minimum per akun kas di dashboard, memakai transaksi Approved/Posted.
 - Pengelolaan cabang dan akun kas, termasuk saldo minimum per akun.
-- Pencatatan transaksi kas masuk/keluar, transfer, petty cash, dan permintaan kas, dengan bukti transaksi opsional PDF/JPG/JPEG/PNG.
-- Login Supabase Auth, approval transaksi/reimbursement, dan riwayat keputusan.
-- Pengajuan reimbursement, bukti privat di Supabase Storage, serta pembayaran yang tercatat sebagai transaksi kas keluar.
-- Bukti transaksi tersimpan di Supabase Storage dan dapat ditinjau approver.
+- Pencatatan transaksi kas masuk/keluar, transfer, petty cash, dan permintaan kas.
+- Approval transaksi dan riwayat keputusan.
 - Laporan arus kas langsung dengan filter periode, akun kas, dan cabang serta ekspor CSV.
 - Saldo dan laporan hanya memakai transaksi `Approved` atau `Posted`; transfer antar-akun tidak dihitung sebagai penerimaan/pengeluaran perusahaan.
+
+Login dan fitur reimbursement tidak digunakan pada versi ini. Data reimbursement, konfigurasi Auth, dan file privat yang sudah ada di Supabase tidak dihapus.
 
 Modul COA, departemen, user/role, jurnal, cash count, approval matrix, dan pengaturan imprest terpisah tidak termasuk dalam aplikasi ringkas ini.
 
@@ -43,7 +42,6 @@ Modul COA, departemen, user/role, jurnal, cash count, approval matrix, dan penga
 │   ├── migrations/
 │   └── schema.sql
 ├── frontend/
-│   ├── auth.css
 │   ├── app.js
 │   ├── index.html
 │   └── style.css
@@ -59,22 +57,20 @@ Modul COA, departemen, user/role, jurnal, cash count, approval matrix, dan penga
 node backend\app.js
 ```
 
-Buka `http://127.0.0.1:3000`. Server ini hanya menyajikan file frontend; tidak menjalankan migration atau menyediakan backend autentikasi.
+Buka `http://127.0.0.1:3000`. Server ini hanya menyajikan file frontend dan tidak menjalankan migration.
 
 Konfigurasi Supabase frontend berada di `frontend/app.js` melalui `window.CASHFLOW_SUPABASE_CONFIG` (URL dan publishable/anon key). Hanya publishable/anon key yang boleh berada di browser; jangan masukkan service-role key atau password ke frontend.
 
 ## Supabase
 
-- Database baru: jalankan `backend/schema.sql`, lalu migration Auth/reimbursement, migration cabang, dan migration saldo minimum/bukti di SQL Editor Supabase.
-- Database lama: buat dan verifikasi backup yang dapat dipulihkan; tinjau foreign key, view, trigger, function, policy, dan aplikasi lain; lalu jalankan migration Auth/reimbursement satu kali, migration cabang, dan migration saldo minimum/bukti. Jangan rerun `schema.sql` sebagai migrasi.
-- `20261010_reimbursement_auth_exports.sql` mengarsipkan data kategori ke `cashflow_archive.categories_20261010`, kemudian menghapus tabel `public.categories` setelah memeriksa jumlah baris. Kategori transaksi tetap disimpan sebagai teks. Baca seluruh SQL dan pastikan dependensi tabel kategori sudah ditangani sebelum menjalankannya.
-- Migration Auth mengganti policy akses anonim dengan Supabase Auth. Setiap akun pengguna harus memiliki `app_metadata.role` yang diatur administrator tepercaya: `employee`, `approver`, atau `finance_manager`. Jangan menyimpan role di `user_metadata` atau mengizinkan pengguna mengubah role sendiri.
-- `finance_manager` mengelola master cabang/akun kas dan pembayaran reimbursement; `approver`/`finance_manager` dapat memutuskan transaksi dan reimbursement. Keputusan dicatat melalui RPC database, bukan update status langsung dari browser.
+- Aplikasi tidak meminta login dan menggunakan Supabase publishable/anon key dari browser. Karena itu data kas, master cabang/akun kas, transaksi, dan approval dapat dibaca atau diubah siapa pun yang dapat mengakses situs. Jangan gunakan konfigurasi ini untuk data rahasia atau lingkungan produksi yang memerlukan kontrol akses.
+- Database baru: jalankan `backend/schema.sql`, migration cabang, migration saldo minimum/bukti, lalu `20261025_remove_login_restore_public_cashflow.sql` di SQL Editor Supabase. Jangan jalankan migration Auth/reimbursement untuk instalasi baru tanpa login.
+- Database lama yang sudah menjalankan migration Auth/reimbursement: buat dan verifikasi backup yang dapat dipulihkan, tinjau foreign key, view, trigger, function, policy, serta aplikasi lain; pastikan migration cabang dan saldo minimum/bukti sudah diterapkan; lalu tinjau dan jalankan `20261025_remove_login_restore_public_cashflow.sql`. Jangan rerun `schema.sql` sebagai migrasi.
+- Migration Auth/reimbursement lama (`20261010_reimbursement_auth_exports.sql`) mengarsipkan kategori lalu menghapus `public.categories`, membuat tabel reimbursement, serta mengganti kebijakan akses. Jangan jalankan ulang. Migration pemulihan akses tanpa login tidak menghapus tabel, data reimbursement, bucket, file, ataupun akun Supabase Auth yang sudah ada.
+- Migration pemulihan akses tanpa login mengizinkan akses publik pada data kas dan master, serta approval melalui RPC yang mencatat nama penyetuju yang diinput pengguna. Nama tersebut tidak diverifikasi oleh sistem identitas; siapa pun dapat membuat keputusan approval. Ini bukan mekanisme aman untuk data keuangan.
 - Migration cabang mengaitkan akun dan transaksi lama ke `Kantor Pusat`; setelah migrasi, periksa dan pindahkan akun yang seharusnya berada di `Pabrik` melalui menu Akun Kas.
-- Migration saldo minimum/bukti membuat bucket privat `cashflow-evidence` dengan batas file 10 MB dan tipe PDF/JPG/JPEG/PNG. Upload bukti transaksi tidak tersedia sampai migration ini dijalankan.
-- Reimbursement memakai bucket privat `reimbursement-receipts`; bukti wajib diunggah sebelum pengajuan dapat dikirim. Pembayaran melalui RPC membuat transaksi `cash-out` pada cabang akun kas yang dipilih.
-- SQL migration di repository adalah instruksi untuk ditinjau dan dijalankan manual. Aplikasi/server tidak menjalankan SQL, dan perubahan kode tidak otomatis mengubah proyek Supabase. Jangan gunakan `DROP ... CASCADE` untuk melewati dependency.
-- `schema.sql` masih membuat beberapa policy development untuk tabel awal; jangan membuka aplikasi/database untuk pengguna sebelum migration Auth dan bukti selesai ditinjau serta diterapkan.
+- Bucket `cashflow-evidence` dan `reimbursement-receipts` tetap privat. Upload dan pratinjau bukti dinonaktifkan tanpa login; file lama tidak dihapus.
+- SQL migration di repository adalah instruksi untuk ditinjau dan dijalankan manual. Aplikasi/server tidak menjalankan SQL dan perubahan kode tidak otomatis mengubah proyek Supabase. Jangan gunakan `DROP ... CASCADE` untuk melewati dependency.
 
 ## Validasi lokal
 
