@@ -22,26 +22,29 @@ ON CONFLICT (id) DO UPDATE SET
 
 DO $policies$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_policies
-        WHERE schemaname = 'storage'
-          AND tablename = 'objects'
-          AND policyname = 'cashflow_evidence_select'
-    ) THEN
-        CREATE POLICY cashflow_evidence_select ON storage.objects
-            FOR SELECT TO anon, authenticated
-            USING (bucket_id = 'cashflow-evidence');
-    END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_policies
-        WHERE schemaname = 'storage'
-          AND tablename = 'objects'
-          AND policyname = 'cashflow_evidence_insert'
-    ) THEN
-        CREATE POLICY cashflow_evidence_insert ON storage.objects
-            FOR INSERT TO anon, authenticated
-            WITH CHECK (bucket_id = 'cashflow-evidence');
-    END IF;
+    DROP POLICY IF EXISTS cashflow_evidence_select ON storage.objects;
+    DROP POLICY IF EXISTS cashflow_evidence_insert ON storage.objects;
+    CREATE POLICY cashflow_evidence_select ON storage.objects
+        FOR SELECT TO authenticated
+        USING (
+            bucket_id = 'cashflow-evidence'
+            AND (
+                (storage.foldername(name))[1] = auth.uid()::text
+                OR (
+                    (auth.jwt() -> 'app_metadata' ->> 'role') IN ('approver', 'finance_manager')
+                    AND EXISTS (
+                        SELECT 1 FROM public.transactions transaction_row
+                        WHERE transaction_row.evidence_path = storage.objects.name
+                    )
+                )
+            )
+        );
+    CREATE POLICY cashflow_evidence_insert ON storage.objects
+        FOR INSERT TO authenticated
+        WITH CHECK (
+            bucket_id = 'cashflow-evidence'
+            AND (storage.foldername(name))[1] = auth.uid()::text
+        );
 END;
 $policies$;
 

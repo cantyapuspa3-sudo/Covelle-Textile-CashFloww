@@ -153,7 +153,8 @@ ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.approvals ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_accounts, public.categories TO anon, authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.branches TO anon, authenticated;
+REVOKE ALL ON public.branches FROM anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.branches TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.transactions, public.approvals TO anon, authenticated;
 
 DO $policies$
@@ -162,10 +163,6 @@ DECLARE
 BEGIN
     FOR policy_row IN
         SELECT * FROM (VALUES
-            ('branches', 'select'),
-            ('branches', 'insert'),
-            ('branches', 'update'),
-            ('branches', 'delete'),
             ('cash_accounts', 'select'),
             ('cash_accounts', 'insert'),
             ('cash_accounts', 'update'),
@@ -204,3 +201,16 @@ BEGIN
     END LOOP;
 END;
 $policies$;
+
+DROP POLICY IF EXISTS cashflow_dev_branches_select ON public.branches;
+DROP POLICY IF EXISTS cashflow_dev_branches_insert ON public.branches;
+DROP POLICY IF EXISTS cashflow_dev_branches_update ON public.branches;
+DROP POLICY IF EXISTS cashflow_dev_branches_delete ON public.branches;
+DROP POLICY IF EXISTS cashflow_branches_authenticated_read ON public.branches;
+DROP POLICY IF EXISTS cashflow_branches_finance_manage ON public.branches;
+CREATE POLICY cashflow_branches_authenticated_read ON public.branches
+    FOR SELECT TO authenticated USING (auth.uid() IS NOT NULL);
+CREATE POLICY cashflow_branches_finance_manage ON public.branches
+    FOR ALL TO authenticated
+    USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'finance_manager')
+    WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'finance_manager');

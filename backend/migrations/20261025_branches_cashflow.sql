@@ -71,39 +71,25 @@ CREATE INDEX IF NOT EXISTS idx_transactions_branch_date
     ON public.transactions(branch_id, transaction_date);
 
 ALTER TABLE public.branches ENABLE ROW LEVEL SECURITY;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.branches TO anon, authenticated;
+REVOKE ALL ON public.branches FROM anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.branches TO authenticated;
 
 DO $policies$
-DECLARE
-    policy_row record;
 BEGIN
-    FOR policy_row IN
-        SELECT * FROM (VALUES
-            ('select'),
-            ('insert'),
-            ('update'),
-            ('delete')
-        ) AS policies(command_name)
-    LOOP
-        IF NOT EXISTS (
-            SELECT 1 FROM pg_policies
-            WHERE schemaname = 'public'
-              AND tablename = 'branches'
-              AND policyname = 'cashflow_dev_branches_' || policy_row.command_name
-        ) THEN
-            EXECUTE format(
-                'CREATE POLICY %I ON public.branches FOR %s TO anon, authenticated %s',
-                'cashflow_dev_branches_' || policy_row.command_name,
-                upper(policy_row.command_name),
-                CASE policy_row.command_name
-                    WHEN 'select' THEN 'USING (true)'
-                    WHEN 'insert' THEN 'WITH CHECK (true)'
-                    WHEN 'update' THEN 'USING (true) WITH CHECK (true)'
-                    WHEN 'delete' THEN 'USING (true)'
-                END
-            );
-        END IF;
-    END LOOP;
+    DROP POLICY IF EXISTS cashflow_dev_branches_select ON public.branches;
+    DROP POLICY IF EXISTS cashflow_dev_branches_insert ON public.branches;
+    DROP POLICY IF EXISTS cashflow_dev_branches_update ON public.branches;
+    DROP POLICY IF EXISTS cashflow_dev_branches_delete ON public.branches;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'branches' AND policyname = 'cashflow_branches_authenticated_read') THEN
+        CREATE POLICY cashflow_branches_authenticated_read ON public.branches
+            FOR SELECT TO authenticated USING (auth.uid() IS NOT NULL);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'branches' AND policyname = 'cashflow_branches_finance_manage') THEN
+        CREATE POLICY cashflow_branches_finance_manage ON public.branches
+            FOR ALL TO authenticated
+            USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'finance_manager')
+            WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'finance_manager');
+    END IF;
 END;
 $policies$;
 
