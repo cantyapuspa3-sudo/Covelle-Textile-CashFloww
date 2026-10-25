@@ -1,15 +1,32 @@
--- Covelle Textile CashFlow: four public business tables.
--- For an existing legacy installation, run the ordered migration in
--- migrations/20261010_four_core_backfill.sql instead of rerunning this setup.
--- This schema contains only the four business tables used by the simplified app.
+-- Covelle Textile CashFlow: five public business tables.
+-- For an existing installation, run migrations/20261025_branches_cashflow.sql
+-- instead of rerunning this setup.
+-- This schema contains the five business tables used by the simplified app.
 -- The development policies preserve the project's existing public anon access;
 -- configure Supabase Auth and production RLS policies before using real data.
+
+CREATE TABLE IF NOT EXISTS public.branches (
+    id varchar(50) PRIMARY KEY,
+    code varchar(30) NOT NULL UNIQUE,
+    name varchar(150) NOT NULL UNIQUE,
+    location varchar(150),
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+INSERT INTO public.branches (id, code, name, location)
+VALUES
+    ('BR-HQ', 'HQ', 'Kantor Pusat', 'Kantor Pusat'),
+    ('BR-FACTORY', 'FACTORY', 'Pabrik', 'Pabrik')
+ON CONFLICT DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS public.cash_accounts (
     id varchar(50) PRIMARY KEY,
     code varchar(30) NOT NULL UNIQUE,
     name varchar(150) NOT NULL UNIQUE,
     account_type varchar(30) NOT NULL CHECK (account_type IN ('Petty Cash', 'Cash', 'Bank')),
+    branch_id varchar(50) NOT NULL REFERENCES public.branches(id) ON DELETE RESTRICT,
     location varchar(150),
     custodian varchar(150),
     opening_balance numeric(18,2) NOT NULL DEFAULT 0,
@@ -39,6 +56,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
         )
     ),
     transaction_date date NOT NULL,
+    branch_id varchar(50) NOT NULL REFERENCES public.branches(id) ON DELETE RESTRICT,
     source_cash_account_id varchar(50) REFERENCES public.cash_accounts(id) ON DELETE RESTRICT,
     cash_account_id varchar(50) REFERENCES public.cash_accounts(id) ON DELETE RESTRICT,
     department varchar(100),
@@ -51,6 +69,9 @@ CREATE TABLE IF NOT EXISTS public.transactions (
     required_date date,
     amount numeric(18,2) NOT NULL CONSTRAINT chk_transaction_amount CHECK (amount >= 0),
     description text,
+    evidence_path text,
+    evidence_name varchar(255),
+    evidence_mime_type varchar(100),
     status varchar(30) NOT NULL DEFAULT 'Pending' CHECK (
         status IN ('Pending', 'Approved', 'Posted', 'Rejected', 'Revision Requested', 'Submitted')
     ),
@@ -80,6 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_transactions_date ON public.transactions(transact
 CREATE INDEX IF NOT EXISTS idx_transactions_type ON public.transactions(type);
 CREATE INDEX IF NOT EXISTS idx_transactions_status ON public.transactions(status);
 CREATE INDEX IF NOT EXISTS idx_transactions_cash_account ON public.transactions(cash_account_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_branch_date ON public.transactions(branch_id, transaction_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_category ON public.transactions(category_id);
 CREATE INDEX IF NOT EXISTS idx_approvals_transaction ON public.approvals(transaction_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_approvals_idempotency_key
@@ -125,11 +147,13 @@ BEFORE INSERT ON public.approvals
 FOR EACH ROW EXECUTE FUNCTION public.cashflow_enforce_approval_sod();
 
 ALTER TABLE public.cash_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.branches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.approvals ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_accounts, public.categories TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.branches TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.transactions, public.approvals TO anon, authenticated;
 
 DO $policies$
@@ -138,6 +162,10 @@ DECLARE
 BEGIN
     FOR policy_row IN
         SELECT * FROM (VALUES
+            ('branches', 'select'),
+            ('branches', 'insert'),
+            ('branches', 'update'),
+            ('branches', 'delete'),
             ('cash_accounts', 'select'),
             ('cash_accounts', 'insert'),
             ('cash_accounts', 'update'),
